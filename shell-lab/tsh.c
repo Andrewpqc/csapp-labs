@@ -52,9 +52,7 @@ struct job_t
 };
 struct job_t jobs[MAXJOBS]; /* The job list */
 
-sigset_t global_mask_all,global_mask_one,global_prev_one;
-
-
+sigset_t global_mask_all, global_mask_one, global_prev_one;
 
 /* End global variables */
 
@@ -91,48 +89,42 @@ void app_error(char *msg);
 typedef void handler_t(int);
 handler_t *Signal(int signum, handler_t *handler);
 
-
-
-
-
-
 /**
  * my tool functions
  **/
 
-
 void Sigprocmask(int how, const sigset_t *set, sigset_t *oldset)
 {
     if (sigprocmask(how, set, oldset) < 0)
-	unix_error("Sigprocmask error");
+        unix_error("Sigprocmask error");
     return;
 }
 
 void Sigemptyset(sigset_t *set)
 {
     if (sigemptyset(set) < 0)
-	unix_error("Sigemptyset error");
+        unix_error("Sigemptyset error");
     return;
 }
 
 void Sigfillset(sigset_t *set)
-{ 
+{
     if (sigfillset(set) < 0)
-	unix_error("Sigfillset error");
+        unix_error("Sigfillset error");
     return;
 }
 
 void Sigaddset(sigset_t *set, int signum)
 {
     if (sigaddset(set, signum) < 0)
-	unix_error("Sigaddset error");
+        unix_error("Sigaddset error");
     return;
 }
 
 void Sigdelset(sigset_t *set, int signum)
 {
     if (sigdelset(set, signum) < 0)
-	unix_error("Sigdelset error");
+        unix_error("Sigdelset error");
     return;
 }
 
@@ -140,7 +132,7 @@ int Sigismember(const sigset_t *set, int signum)
 {
     int rc;
     if ((rc = sigismember(set, signum)) < 0)
-	unix_error("Sigismember error");
+        unix_error("Sigismember error");
     return rc;
 }
 
@@ -151,7 +143,6 @@ int Sigsuspend(const sigset_t *set)
         unix_error("Sigsuspend error");
     return rc;
 }
-
 
 /*************************************************************
  * The Sio (Signal-safe I/O) package - simple reentrant output
@@ -166,7 +157,8 @@ static void sio_reverse(char s[])
 {
     int c, i, j;
 
-    for (i = 0, j = strlen(s)-1; i < j; i++, j--) {
+    for (i = 0, j = strlen(s) - 1; i < j; i++, j--)
+    {
         c = s[i];
         s[i] = s[j];
         s[j] = c;
@@ -174,12 +166,13 @@ static void sio_reverse(char s[])
 }
 
 /* sio_ltoa - Convert long to base b string (from K&R) */
-static void sio_ltoa(long v, char s[], int b) 
+static void sio_ltoa(long v, char s[], int b)
 {
     int c, i = 0;
-    
-    do {  
-        s[i++] = ((c = (v % b)) < 10)  ?  c + '0' : c - 10 + 'a';
+
+    do
+    {
+        s[i++] = ((c = (v % b)) < 10) ? c + '0' : c - 10 + 'a';
     } while ((v /= b) > 0);
     s[i] = '\0';
     sio_reverse(s);
@@ -207,32 +200,32 @@ ssize_t sio_puts(char s[]) /* Put string */
 ssize_t sio_putl(long v) /* Put long */
 {
     char s[128];
-    
-    sio_ltoa(v, s, 10); /* Based on K&R itoa() */  //line:csapp:sioltoa
+
+    sio_ltoa(v, s, 10); /* Based on K&R itoa() */ //line:csapp:sioltoa
     return sio_puts(s);
 }
 
 void sio_error(char s[]) /* Put error message and exit */
 {
     sio_puts(s);
-    _exit(1);                                      //line:csapp:sioexit
+    _exit(1); //line:csapp:sioexit
 }
 /* $end siopublic */
 ssize_t Sio_putl(long v)
 {
     ssize_t n;
-  
+
     if ((n = sio_putl(v)) < 0)
-	sio_error("Sio_putl error");
+        sio_error("Sio_putl error");
     return n;
 }
 
 ssize_t Sio_puts(char s[])
 {
     ssize_t n;
-  
+
     if ((n = sio_puts(s)) < 0)
-	sio_error("Sio_puts error");
+        sio_error("Sio_puts error");
     return n;
 }
 
@@ -241,23 +234,16 @@ void Sio_error(char s[])
     sio_error(s);
 }
 
-
-
-
 /* $begin forkwrapper */
-pid_t Fork(void) 
+pid_t Fork(void)
 {
     pid_t pid;
 
     if ((pid = fork()) < 0)
-	unix_error("Fork error");
+        unix_error("Fork error");
     return pid;
 }
 /* $end forkwrapper */
-
-
-
-
 
 /*
  * main - The shell's main routine 
@@ -294,8 +280,7 @@ int main(int argc, char **argv)
     /*init the global sigset_t var*/
     Sigfillset(&global_mask_all);
     Sigemptyset(&global_mask_one);
-    Sigaddset(&global_mask_one,SIGCHLD);
-
+    Sigaddset(&global_mask_one, SIGCHLD);
 
     /* Install the signal handlers */
 
@@ -319,8 +304,9 @@ int main(int argc, char **argv)
             printf("%s", prompt);
             fflush(stdout);
         }
-       
-        if ((fgets(cmdline, MAXLINE, stdin) == NULL) && ferror(stdin)){
+
+        if ((fgets(cmdline, MAXLINE, stdin) == NULL) && ferror(stdin))
+        {
             app_error("fgets error");
         }
         if (feof(stdin))
@@ -353,44 +339,49 @@ void eval(char *cmdline)
 {
     char *argv[MAXARGS]; //将命令行输入的字符串解析放到字符串数组argv中
     char buf[MAXLINE];   //保存原始的命令字符串
-    int bg;//标志job运行于前台还是后台的标志
+    int bg;              //标志job运行于前台还是后台的标志
     pid_t pid;
 
     strcpy(buf, cmdline);
     bg = parseline(buf, argv);
-    if(argv[0]==NULL)
+    if (argv[0] == NULL)
         return;
-    
-    if(!builtin_cmd(argv)){//非内置的命令
-        Sigprocmask(SIG_BLOCK,&global_mask_one,&global_prev_one);
-        if((pid=Fork())==0){//child
-            Sigprocmask(SIG_SETMASK,&global_prev_one,NULL);
-            if(execve(argv[0],argv,environ)<0){
-                printf("%s: Command not found.\n",argv[0]);
+
+    if (!builtin_cmd(argv))
+    { //非内置的命令
+        Sigprocmask(SIG_BLOCK, &global_mask_one, &global_prev_one);
+        if ((pid = Fork()) == 0)
+        { //child
+            Sigprocmask(SIG_SETMASK, &global_prev_one, NULL);
+            if (execve(argv[0], argv, environ) < 0)
+            {
+                printf("%s: Command not found.\n", argv[0]);
                 fflush(stdout);
                 exit(0);
             }
         }
 
+        int status = (bg) ? BG : FG;
         //无论是前台还是后台进程都要加入到job list中
-        Sigprocmask(SIG_BLOCK,&global_mask_all,NULL);
-        int status=(bg)?BG:FG;
-        addjob(jobs,pid,status,cmdline);
-        Sigprocmask(SIG_SETMASK,&global_prev_one,NULL);
+        Sigprocmask(SIG_BLOCK, &global_mask_all, NULL);
+        addjob(jobs, pid, status, cmdline);
+        Sigprocmask(SIG_SETMASK, &global_prev_one, NULL);
 
-        
-        if(!bg){//前台进程直接在此处回收,以阻塞主进程的执行
-            if(waitpid(pid,NULL,0)<0){
+        if (!bg)
+        { //前台进程直接在此处回收,以阻塞主进程的执行
+            if (waitpid(pid, NULL, 0) < 0)
+            {
                 unix_error("waitfg: waitpid error");
             }
-            else{
-                deletejob(jobs,pid);
-                // printf("Job [%d] (%d) terminates by signal 2\n",pid2jid(pid),pid);
-                // fflush(stdout);
+            else
+            {
+                deletejob(jobs, pid);
             }
-        }else{ //后台进程给出提示
-           fprintf(stdout,"[%d] (%d) %s",pid2jid(pid),pid,cmdline);
-           fflush(stdout);
+        }
+        else
+        { //后台进程的回收由信号处理程序来执行，此处不等待
+            fprintf(stdout, "[%d] (%d) %s", pid2jid(pid), pid, cmdline);
+            fflush(stdout);
         }
         return;
     }
@@ -466,6 +457,30 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv)
 {
+    if (!strcmp(argv[0], "quit"))
+    { //quit the shell
+        exit(0);
+    }
+    if (!strcmp(argv[0], "&"))
+    { //ignore the command &
+        return 1;
+    }
+    if (!strcmp(argv[0], "jobs"))
+    {
+        listjobs(jobs);
+        return 1;
+    }
+    if (!strcmp(argv[0], "bg"))
+    {
+        return 1;
+    }
+    if (!strcmp(argv[0], "fg"))
+    {
+        return 1;
+    }
+    if (!strcmp(argv[1], "kill"))
+    {
+    }
     return 0; /* not a builtin command */
 }
 
@@ -474,6 +489,87 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv)
 {
+    if (!strcmp(argv[0], "bg")){ //start with bg
+        //判断传入的参数是jid,还是pid
+        int is_pid = (argv[1][0] == "%") ? 0 : 1;
+        if (is_pid){ //进程id
+            pid_t pid = (pid_t)atoi(argv[1]);
+            struct job_t *job = getjobpid(jobs, pid);
+            if (job->state == ST){ //当前job处于STOP状态，那么这条命令合法，这里要做的就是将此job转化为后台运行
+                if (kill(pid, SIGCONT) < 0){
+                    fprintf(stderr, "kill (int) error");
+                    return;
+                }
+                else{
+                    job->state=BG;
+                }
+            }
+            else{ //当前job处于其他状态，这条命令不合法
+                fprint(stdout, "this command is not illege");
+                return;
+            }
+        }
+        else
+        { //job id
+            char jid_dest[strlen(argv[1])];
+            strncpy(jid_dest, argv + 1, strlen(argv[1])-1);
+            int jid = (int)atoi(jid_dest);
+            struct job_t* job=getjobjid(jid);
+            if (job->state == ST){ //当前job处于STOP状态，那么这条命令合法，这里要做的就是将此job转化为后台运行
+                if (kill(job->pid, SIGCONT) < 0){//操作失败
+                    fprintf(stderr, "kill (int) error");
+                    return;
+                }
+                else{
+                    job->state=BG;
+                }
+            }
+            else{ //当前job处于其他状态，这条命令不合法
+                fprint(stdout, "this command is not illege");
+                return;
+            }
+        }
+    }else if(!strcmp(argv[0], "fg")){
+        ////////////////////////////////////////////////////////////////////////////////////
+        int is_pid = (argv[1][0] == "%") ? 0 : 1;
+        if (is_pid){ //进程id
+            pid_t pid = (pid_t)atoi(argv[1]);
+            struct job_t *job = getjobpid(jobs, pid);
+            if ((job->state == ST) || (job->state==BG)){ //当前job处于STOP状态，那么这条命令合法，这里要做的就是将此job转化为后台运行
+                if (kill(pid, SIGCONT) < 0){
+                    fprintf(stderr, "kill (int) error");
+                    return;
+                }
+                else{
+                    job->state=BG;
+                }
+            }
+            else{ //当前job处于其他状态，这条命令不合法
+                fprint(stdout, "this command is not illege");
+                return;
+            }
+        }
+        else
+        { //job id
+            char jid_dest[strlen(argv[1])];
+            strncpy(jid_dest, argv + 1, strlen(argv[1])-1);
+            int jid = (int)atoi(jid_dest);
+            struct job_t* job=getjobjid(jid);
+            if (job->state == ST){ //当前job处于STOP状态，那么这条命令合法，这里要做的就是将此job转化为后台运行
+                if (kill(job->pid, SIGCONT) < 0){//操作失败
+                    fprintf(stderr, "kill (int) error");
+                    return;
+                }
+                else{
+                    job->state=BG;
+                }
+            }
+            else{ //当前job处于其他状态，这条命令不合法
+                fprint(stdout, "this command is not illege");
+                return;
+            }
+        }
+    }
     return;
 }
 
@@ -498,26 +594,27 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig)
 {
-    int olderron=errno;
-    sigset_t mask_all,prev_all;
+    int olderron = errno;
+    sigset_t mask_all, prev_all;
     pid_t pid;
-    
+
     Sigfillset(&mask_all);
-    
+
     //回收子进程，从job列表中删除对应的job
-    while((pid=waitpid(-1,NULL,0))>0){
-        Sigprocmask(SIG_BLOCK,&mask_all,&prev_all);
-        deletejob(jobs,pid);
+    while ((pid = waitpid(-1, NULL, 0)) > 0)
+    {
+        Sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+        deletejob(jobs, pid);
         // printf("子进程%d已经被回收!",pid);
-        printf("Job [%d] (%d) terminates by signal 2\n",pid2jid(pid),pid);
+        printf("Job [%d] (%d) terminates by signal 2\n", pid2jid(pid), pid);
         fflush(stdout);
-        Sigprocmask(SIG_SETMASK,&prev_all,NULL);        
+        Sigprocmask(SIG_SETMASK, &prev_all, NULL);
     }
 
-    if(errno!=ECHILD)
+    if (errno != ECHILD)
         Sio_error("waitpid error");
-    
-    errno=olderron;
+
+    errno = olderron;
 }
 
 /* 
@@ -528,17 +625,20 @@ void sigchld_handler(int sig)
 void sigint_handler(int sig)
 {
     int olderrno = errno;
-    pid_t current_fgpid=fgpid(jobs);
-    
-    if(current_fgpid==0){//当前没有前台进程，
+    pid_t current_fgpid = fgpid(jobs);
 
-    } else{//当前有前台进程，杀死该前台进程
-        if (kill(current_fgpid, SIGINT) < 0)
+    if (current_fgpid == 0)
+    { //当前没有前台进程，
+        //no effect
+    }
+    else
+    { //当前有前台进程，杀死该前台进程及其子进程
+        if (kill(-current_fgpid, SIGINT) < 0)
             fprintf(stderr, "kill (int) error");
-        fprintf(stdout,"Job [%d] (%d) terminated by signal 2\n",pid2jid(current_fgpid),current_fgpid);
+        fprintf(stdout, "Job [%d] (%d) terminated by signal 2\n", pid2jid(current_fgpid), current_fgpid);
         fflush(stdout);
     }
-    
+
     errno = olderrno;
 }
 
@@ -549,7 +649,28 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig)
 {
-    return;
+    int olderrno = errno;
+    pid_t current_fgpid = fgpid(jobs);
+
+    if (current_fgpid == 0)
+    { //当前没有前台进程，
+        //no effect
+    }
+    else
+    { //当前有前台进程，杀死该前台进程
+        if (kill(-current_fgpid, SIGTSTP) < 0)
+            fprintf(stderr, "kill (int) error");
+        fprintf(stdout, "Job [%d] (%d) stoped by signal SIGTSTP\n", pid2jid(current_fgpid), current_fgpid);
+        fflush(stdout);
+        struct pid_t* fgjob=getjobpid(jobs,current_fgpid);
+        fgjob->status=ST;
+        
+    }
+
+    errno = olderrno;
+
+
+    // return;
 }
 
 /*********************
