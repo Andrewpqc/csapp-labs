@@ -94,6 +94,23 @@ handler_t *Signal(int signum, handler_t *handler);
  * my tool functions
  **/
 
+void Kill(pid_t pid, int signum) 
+{
+    int rc;
+
+    if ((rc = kill(pid, signum)) < 0)
+	unix_error("Kill error");
+}
+
+pid_t Fork(void)
+{
+    pid_t pid;
+
+    if ((pid = fork()) < 0)
+        unix_error("Fork error");
+    return pid;
+}
+
 void Sigprocmask(int how, const sigset_t *set, sigset_t *oldset)
 {
     if (sigprocmask(how, set, oldset) < 0)
@@ -118,133 +135,10 @@ void Sigfillset(sigset_t *set)
 void Sigaddset(sigset_t *set, int signum)
 {
     if (sigaddset(set, signum) < 0)
-        unix_error("Sigaddset error");
+	unix_error("Sigaddset error");
     return;
 }
 
-void Sigdelset(sigset_t *set, int signum)
-{
-    if (sigdelset(set, signum) < 0)
-        unix_error("Sigdelset error");
-    return;
-}
-
-int Sigismember(const sigset_t *set, int signum)
-{
-    int rc;
-    if ((rc = sigismember(set, signum)) < 0)
-        unix_error("Sigismember error");
-    return rc;
-}
-
-int Sigsuspend(const sigset_t *set)
-{
-    int rc = sigsuspend(set); /* always returns -1 */
-    if (errno != EINTR)
-        unix_error("Sigsuspend error");
-    return rc;
-}
-
-/*************************************************************
- * The Sio (Signal-safe I/O) package - simple reentrant output
- * functions that are safe for signal handlers.
- *************************************************************/
-
-/* Private sio functions */
-
-/* $begin sioprivate */
-/* sio_reverse - Reverse a string (from K&R) */
-static void sio_reverse(char s[])
-{
-    int c, i, j;
-
-    for (i = 0, j = strlen(s) - 1; i < j; i++, j--)
-    {
-        c = s[i];
-        s[i] = s[j];
-        s[j] = c;
-    }
-}
-
-/* sio_ltoa - Convert long to base b string (from K&R) */
-static void sio_ltoa(long v, char s[], int b)
-{
-    int c, i = 0;
-
-    do
-    {
-        s[i++] = ((c = (v % b)) < 10) ? c + '0' : c - 10 + 'a';
-    } while ((v /= b) > 0);
-    s[i] = '\0';
-    sio_reverse(s);
-}
-
-/* sio_strlen - Return length of string (from K&R) */
-static size_t sio_strlen(char s[])
-{
-    int i = 0;
-
-    while (s[i] != '\0')
-        ++i;
-    return i;
-}
-/* $end sioprivate */
-
-/* Public Sio functions */
-/* $begin siopublic */
-
-ssize_t sio_puts(char s[]) /* Put string */
-{
-    return write(STDOUT_FILENO, s, sio_strlen(s)); //line:csapp:siostrlen
-}
-
-ssize_t sio_putl(long v) /* Put long */
-{
-    char s[128];
-
-    sio_ltoa(v, s, 10); /* Based on K&R itoa() */ //line:csapp:sioltoa
-    return sio_puts(s);
-}
-
-void sio_error(char s[]) /* Put error message and exit */
-{
-    sio_puts(s);
-    _exit(1); //line:csapp:sioexit
-}
-/* $end siopublic */
-ssize_t Sio_putl(long v)
-{
-    ssize_t n;
-
-    if ((n = sio_putl(v)) < 0)
-        sio_error("Sio_putl error");
-    return n;
-}
-
-ssize_t Sio_puts(char s[])
-{
-    ssize_t n;
-
-    if ((n = sio_puts(s)) < 0)
-        sio_error("Sio_puts error");
-    return n;
-}
-
-void Sio_error(char s[])
-{
-    sio_error(s);
-}
-
-/* $begin forkwrapper */
-pid_t Fork(void)
-{
-    pid_t pid;
-
-    if ((pid = fork()) < 0)
-        unix_error("Fork error");
-    return pid;
-}
-/* $end forkwrapper */
 
 /*
  * main - The shell's main routine 
@@ -349,11 +243,12 @@ void eval(char *cmdline)
         return;
 
     if (!builtin_cmd(argv))
-    { //非内置的命令
+    {
         Sigprocmask(SIG_BLOCK, &global_mask_one, &global_prev_one);
         if ((pid = Fork()) == 0)
-        { //child
+        { 
             Sigprocmask(SIG_SETMASK, &global_prev_one, NULL);
+            setpgid(0,0);//创建一个以该子进程进程id为进程组id的进程组，然后将该子进程放入新创建的进程组。
             if (execve(argv[0], argv, environ) < 0)
             {
                 printf("%s: Command not found.\n", argv[0]);
@@ -367,12 +262,16 @@ void eval(char *cmdline)
         addjob(jobs, pid, status, cmdline);
         Sigprocmask(SIG_SETMASK, &global_prev_one, NULL);
 
-        if (!bg)
-        { //前台进程直接在此处回收,以阻塞主进程的执行
-            if (waitpid(pid, NULL, 0) < 0)
-                unix_error("waitfg: waitpid error");
-            else
-                deletejob(jobs, pid);
+        // if (!bg)
+        // { //前台进程直接在此处回收,以阻塞主进程的执行
+            
+        //     if (waitpid(pid, NULL, 0) < 0)
+        //         unix_error("waitfg: waitpid error");
+        //     else
+        //         deletejob(jobs, pid);
+        // }
+        if(!bg){
+            waitfg(pid);
         }
         else
         { //后台进程的回收由信号处理程序来执行，此处不等待
@@ -521,9 +420,13 @@ void do_bgfg(char **argv)
         if(job->state==ST){
             if (kill(job->pid, SIGCONT) < 0)
                 fprintf(stderr, "bg Job[%d],Pid[%d] error\n",job->jid,job->pid);
-            else
-                job->state=FG;  
+            else{
+                job->state=FG;
+                waitfg(job->pid);//变成前台作业则需要等待它执行完毕
+            }  
         }else if(job->state==BG){
+            job->state=FG;
+            waitfg(job->pid);
             //??? how to change a running backgroung job to a running foreground job
         }else{
             printf("Job[%d],Pid[%d]当前的状态不为stopped or running background job,不能对其进行'fg'操作\n",job->jid,job->pid);
@@ -536,8 +439,16 @@ void do_bgfg(char **argv)
 /* 
  * waitfg - Block until process pid is no longer the foreground process
  */
+
+/*另外一种想法，前台进程直接在主进程中用waitpid回收，然后从job list中删除掉对应的job
+这样既阻塞了主进程的执行又回收了子进程，但是这种做法不够统一，统一的做法是将所有的子进程都
+加入到job list中，然后回收僵尸进程的工作都留给SIGCHLD信号处理程序完成，等待前台进程的
+方法如下*/
 void waitfg(pid_t pid)
 {
+    while(pid == fgpid(jobs)){
+        sleep(0);
+    }
     return;
 }
 
@@ -557,21 +468,36 @@ void sigchld_handler(int sig)
     int olderron = errno;
     sigset_t mask_all, prev_all;
     pid_t pid;
+    int status;
 
     Sigfillset(&mask_all);
 
     //回收子进程，从job列表中删除对应的job
-    while ((pid = waitpid(-1, NULL, 0)) > 0)
+    while ((pid = waitpid(-1, &status, WNOHANG|WUNTRACED)) > 0)
     {
-        Sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
-        deletejob(jobs, pid);
-        Sigprocmask(SIG_SETMASK, &prev_all, NULL);
-        printf("Job [%d] (%d) terminates by signal 2\n", pid2jid(pid), pid);
-        fflush(stdout);
+        if(WIFEXITED(status)){//正常终止
+            //WEXITSTATUS(status)拿到终止状态
+            Sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+            deletejob(jobs, pid);
+            Sigprocmask(SIG_SETMASK, &prev_all, NULL);
+        }else if(WIFSIGNALED(status)){
+            Sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+            deletejob(jobs, pid);
+            Sigprocmask(SIG_SETMASK, &prev_all, NULL);
+            printf("Job [%d] (%d) terminated by signal %d\n",pid2jid(pid),pid,WTERMSIG(status));
+            fflush(stdout);
+        }else if(WIFSTOPPED(status)){
+            struct job_t *job = getjobpid(jobs,pid);
+            if(job !=NULL )
+                job->state = ST;
+            printf("Job [%d] (%d) stopped by signal %d\n",pid2jid(pid),pid,WSTOPSIG(status));
+        }
     }
 
-    if (errno != ECHILD)
-        Sio_error("waitpid error");
+    if (errno != ECHILD){
+        fprintf(stderr,"waitpid error");
+        fflush(stderr);
+    }
 
     errno = olderron;
 }
@@ -592,14 +518,9 @@ void sigint_handler(int sig)
     }
     else
     { //当前有前台进程，杀死该前台进程及其子进程
-        if (kill(current_fgpid, SIGINT) < 0){
-            fprintf(stderr, "kill  error");
-            exit(1);
-        }
-        // struct job_t* job=getjobpid(jobs,current_fgpid);
-        // job->state=ST;
-        fprintf(stdout, "Job [%d] (%d) terminated by signal SIGINT.\n", pid2jid(current_fgpid), current_fgpid);
-        fflush(stdout);
+        Kill(-current_fgpid,SIGINT);
+        //回收子进程的工作留给信号处理程序
+        
     }
 
     errno = olderrno;
@@ -621,14 +542,11 @@ void sigtstp_handler(int sig)
     }
     else
     { //当前有前台进程，停止该进程组的所有进程
-        if (kill(current_fgpid, SIGTSTP) < 0){
-            fprintf(stderr, "stop error\n");
-            exit(1);
-        }
-        struct job_t* fgjob=getjobpid(jobs,current_fgpid);
-        fgjob->state=ST;  
-        fprintf(stdout, "Job [%d] (%d) suspended by signal SIGTSTP\n", pid2jid(current_fgpid), current_fgpid);
-        fflush(stdout);
+        Kill(-current_fgpid,SIGTSTP);
+        // struct job_t* fgjob=getjobpid(jobs,current_fgpid);
+        // fgjob->state=ST;  
+        // fprintf(stdout, "Job [%d] (%d) suspended by signal SIGTSTP\n", pid2jid(current_fgpid), current_fgpid);
+        // fflush(stdout);
     }
 
     errno = olderrno;
