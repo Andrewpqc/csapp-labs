@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <stdbool.h>
 // #include <sigaction.h>
 
 /* Misc manifest constants */
@@ -360,7 +361,6 @@ void eval(char *cmdline)
                 exit(0);
             }
         }
-
         int status = (bg) ? BG : FG;
         //无论是前台还是后台进程都要加入到job list中
         Sigprocmask(SIG_BLOCK, &global_mask_all, NULL);
@@ -370,22 +370,16 @@ void eval(char *cmdline)
         if (!bg)
         { //前台进程直接在此处回收,以阻塞主进程的执行
             if (waitpid(pid, NULL, 0) < 0)
-            {
                 unix_error("waitfg: waitpid error");
-            }
             else
-            {
                 deletejob(jobs, pid);
-            }
         }
         else
         { //后台进程的回收由信号处理程序来执行，此处不等待
             fprintf(stdout, "[%d] (%d) %s", pid2jid(pid), pid, cmdline);
             fflush(stdout);
         }
-        return;
     }
-    return;
 }
 
 /* 
@@ -455,31 +449,28 @@ int parseline(const char *cmdline, char **argv)
  * builtin_cmd - If the user has typed a built-in command then execute
  *    it immediately.  
  */
+
+
+
 int builtin_cmd(char **argv)
 {
     if (!strcmp(argv[0], "quit"))
     { //quit the shell
         exit(0);
     }
-    if (!strcmp(argv[0], "&"))
-    { //ignore the command &
-        return 1;
-    }
     if (!strcmp(argv[0], "jobs"))
     {
         listjobs(jobs);
         return 1;
     }
-    if (!strcmp(argv[0], "bg"))
+    if ((!strcmp(argv[0], "bg"))||(!strcmp(argv[0],"fg")))
     {
+        do_bgfg(argv);
         return 1;
     }
-    if (!strcmp(argv[0], "fg"))
+    if (!strcmp(argv[0], "kill"))
     {
         return 1;
-    }
-    if (!strcmp(argv[1], "kill"))
-    {
     }
     return 0; /* not a builtin command */
 }
@@ -487,87 +478,56 @@ int builtin_cmd(char **argv)
 /* 
  * do_bgfg - Execute the builtin bg and fg commands
  */
+
+
+struct job_t* get_job_from_argc(char* argc){
+    bool is_pid = ((argc[0] == '%') ? false : true);
+    if (is_pid){
+        pid_t pid=(pid_t)atoi(argc);
+        struct job_t* job=getjobpid(jobs,pid);
+        return job;
+    }else{
+        char jid_dest[strlen(argc)-1];
+        strncpy(jid_dest, argc + 1, strlen(argc)-1);
+        int jid = (int)atoi(jid_dest);
+        struct job_t* job=getjobjid(jobs,jid);
+        return job;
+    }
+}
+
+
+/**
+ * bg <job>: Change a stopped background job to a running background job.
+`* fg <job>: Change a stopped or running background job to a running in the foreground.
+ **/
 void do_bgfg(char **argv)
-{
-    if (!strcmp(argv[0], "bg")){ //start with bg
-        //判断传入的参数是jid,还是pid
-        int is_pid = (argv[1][0] == "%") ? 0 : 1;
-        if (is_pid){ //进程id
-            pid_t pid = (pid_t)atoi(argv[1]);
-            struct job_t *job = getjobpid(jobs, pid);
-            if (job->state == ST){ //当前job处于STOP状态，那么这条命令合法，这里要做的就是将此job转化为后台运行
-                if (kill(pid, SIGCONT) < 0){
-                    fprintf(stderr, "kill (int) error");
-                    return;
-                }
-                else{
-                    job->state=BG;
-                }
-            }
-            else{ //当前job处于其他状态，这条命令不合法
-                fprint(stdout, "this command is not illege");
-                return;
-            }
-        }
-        else
-        { //job id
-            char jid_dest[strlen(argv[1])];
-            strncpy(jid_dest, argv + 1, strlen(argv[1])-1);
-            int jid = (int)atoi(jid_dest);
-            struct job_t* job=getjobjid(jid);
-            if (job->state == ST){ //当前job处于STOP状态，那么这条命令合法，这里要做的就是将此job转化为后台运行
-                if (kill(job->pid, SIGCONT) < 0){//操作失败
-                    fprintf(stderr, "kill (int) error");
-                    return;
-                }
-                else{
-                    job->state=BG;
-                }
-            }
-            else{ //当前job处于其他状态，这条命令不合法
-                fprint(stdout, "this command is not illege");
-                return;
-            }
-        }
+{   
+    if (argv[1]==NULL){
+        return;
+    }
+    if(!strcmp(argv[0], "bg")){
+       struct job_t* job=get_job_from_argc(argv[1]);
+       if(job->state==ST){
+           if (kill(job->pid, SIGCONT) < 0)
+                fprintf(stderr, "bg Job[%d],Pid[%d] error\n",job->jid,job->pid);
+            else
+                job->state=BG;      
+       }else{
+           printf("Job[%d],Pid[%d]当前的状态不为stopped background job,不能对其进行'bg'操作\n",job->jid,job->pid);
+           fflush(stdout);
+       }
     }else if(!strcmp(argv[0], "fg")){
-        ////////////////////////////////////////////////////////////////////////////////////
-        int is_pid = (argv[1][0] == "%") ? 0 : 1;
-        if (is_pid){ //进程id
-            pid_t pid = (pid_t)atoi(argv[1]);
-            struct job_t *job = getjobpid(jobs, pid);
-            if ((job->state == ST) || (job->state==BG)){ //当前job处于STOP状态，那么这条命令合法，这里要做的就是将此job转化为后台运行
-                if (kill(pid, SIGCONT) < 0){
-                    fprintf(stderr, "kill (int) error");
-                    return;
-                }
-                else{
-                    job->state=BG;
-                }
-            }
-            else{ //当前job处于其他状态，这条命令不合法
-                fprint(stdout, "this command is not illege");
-                return;
-            }
-        }
-        else
-        { //job id
-            char jid_dest[strlen(argv[1])];
-            strncpy(jid_dest, argv + 1, strlen(argv[1])-1);
-            int jid = (int)atoi(jid_dest);
-            struct job_t* job=getjobjid(jid);
-            if (job->state == ST){ //当前job处于STOP状态，那么这条命令合法，这里要做的就是将此job转化为后台运行
-                if (kill(job->pid, SIGCONT) < 0){//操作失败
-                    fprintf(stderr, "kill (int) error");
-                    return;
-                }
-                else{
-                    job->state=BG;
-                }
-            }
-            else{ //当前job处于其他状态，这条命令不合法
-                fprint(stdout, "this command is not illege");
-                return;
-            }
+        struct job_t* job=get_job_from_argc(argv[1]);
+        if(job->state==ST){
+            if (kill(job->pid, SIGCONT) < 0)
+                fprintf(stderr, "bg Job[%d],Pid[%d] error\n",job->jid,job->pid);
+            else
+                job->state=FG;  
+        }else if(job->state==BG){
+            //??? how to change a running backgroung job to a running foreground job
+        }else{
+            printf("Job[%d],Pid[%d]当前的状态不为stopped or running background job,不能对其进行'fg'操作\n",job->jid,job->pid);
+            fflush(stdout);
         }
     }
     return;
@@ -605,10 +565,9 @@ void sigchld_handler(int sig)
     {
         Sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
         deletejob(jobs, pid);
-        // printf("子进程%d已经被回收!",pid);
+        Sigprocmask(SIG_SETMASK, &prev_all, NULL);
         printf("Job [%d] (%d) terminates by signal 2\n", pid2jid(pid), pid);
         fflush(stdout);
-        Sigprocmask(SIG_SETMASK, &prev_all, NULL);
     }
 
     if (errno != ECHILD)
@@ -633,9 +592,13 @@ void sigint_handler(int sig)
     }
     else
     { //当前有前台进程，杀死该前台进程及其子进程
-        if (kill(-current_fgpid, SIGINT) < 0)
-            fprintf(stderr, "kill (int) error");
-        fprintf(stdout, "Job [%d] (%d) terminated by signal 2\n", pid2jid(current_fgpid), current_fgpid);
+        if (kill(current_fgpid, SIGINT) < 0){
+            fprintf(stderr, "kill  error");
+            exit(1);
+        }
+        // struct job_t* job=getjobpid(jobs,current_fgpid);
+        // job->state=ST;
+        fprintf(stdout, "Job [%d] (%d) terminated by signal SIGINT.\n", pid2jid(current_fgpid), current_fgpid);
         fflush(stdout);
     }
 
@@ -657,20 +620,19 @@ void sigtstp_handler(int sig)
         //no effect
     }
     else
-    { //当前有前台进程，杀死该前台进程
-        if (kill(-current_fgpid, SIGTSTP) < 0)
-            fprintf(stderr, "kill (int) error");
-        fprintf(stdout, "Job [%d] (%d) stoped by signal SIGTSTP\n", pid2jid(current_fgpid), current_fgpid);
+    { //当前有前台进程，停止该进程组的所有进程
+        if (kill(current_fgpid, SIGTSTP) < 0){
+            fprintf(stderr, "stop error\n");
+            exit(1);
+        }
+        struct job_t* fgjob=getjobpid(jobs,current_fgpid);
+        fgjob->state=ST;  
+        fprintf(stdout, "Job [%d] (%d) suspended by signal SIGTSTP\n", pid2jid(current_fgpid), current_fgpid);
         fflush(stdout);
-        struct pid_t* fgjob=getjobpid(jobs,current_fgpid);
-        fgjob->status=ST;
-        
     }
 
     errno = olderrno;
 
-
-    // return;
 }
 
 /*********************
