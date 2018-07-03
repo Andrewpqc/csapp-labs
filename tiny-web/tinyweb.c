@@ -116,34 +116,37 @@ void serve_static(int fd, char *filename, int filesize)
     char *srcp, filetype[MAXLINE], buf[MAXBUF];
  
     /* Send response headers to client */
-    get_filetype(filename, filetype);       //line:netp:servestatic:getfiletype
-    sprintf(buf, "HTTP/1.0 200 OK\r\n");    //line:netp:servestatic:beginserve
+    get_filetype(filename, filetype);       
+    sprintf(buf, "HTTP/1.0 200 OK\r\n");    
     sprintf(buf, "%sServer: Tiny Web Server\r\n", buf);
     sprintf(buf, "%sConnection: close\r\n", buf);
     sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
     sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, filetype);
-    Rio_writen(fd, buf, strlen(buf));       //line:netp:servestatic:endserve
+    Rio_writen(fd, buf, strlen(buf));      
     printf("Response headers:\n");
     printf("%s", buf);
 
     /* Send response body to client */
-    srcfd = Open(filename, O_RDONLY, 0);    //line:netp:servestatic:open
+    srcfd = Open(filename, O_RDONLY, 0);    
     
-    srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);//line:netp:servestatic:mmap
-    Close(srcfd);                           //line:netp:servestatic:close
-    Rio_writen(fd, srcp, filesize);         //line:netp:servestatic:write
-    /*
-    char *data = (char*)malloc(filesize * sizeof(char));
-    if (rio_readn(srcfd, data, filesize) > 0) {
-        rio_writen(srcfd, data, filesize);
-    }*/
-   // Close(srcfd);
-    Munmap(srcp, filesize);                 //line:netp:servestatic:munmap
+    //将被请求文件内容映射到一个虚拟地址空间
+    //调用mmap将文件srcfd的前filesize个字节
+    //映射到一个从地址srcp开始的私有只读虚拟内存区域
+    srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
+    Close(srcfd);//因为已经将文件映射到了内存，所以不在需要文件描述符了                           
+    Rio_writen(fd, srcp, filesize);        
+    Munmap(srcp, filesize);
+
+    //上面使用的是Mmap,Munmap,也可以使用下面的方式
+    // char *data = (char*)malloc(filesize * sizeof(char));
+    // while(rio_readn(srcfd, data, filesize) > 0) {
+    //     rio_writen(fd, data, filesize);
+    // }
+    // Close(srcfd);
+   
 }
 
-/*
- * get_filetype - derive file type from file name
- */
+
 void get_filetype(char *filename, char *filetype) 
 {
     if (strstr(filename, ".html"))
@@ -159,7 +162,7 @@ void get_filetype(char *filename, char *filetype)
     else
 	    strcpy(filetype, "text/plain");
 }  
-/* $end serve_static */
+
 
 /*
  * serve_dynamic - run a CGI program on behalf of the client
@@ -175,11 +178,11 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
     sprintf(buf, "Server: Tiny Web Server\r\n");
     Rio_writen(fd, buf, strlen(buf));
   
-    if (Fork() == 0) { /* Child */ //line:netp:servedynamic:fork
+    if (Fork() == 0) { /* Child */ 
 	/* Real server would set all CGI vars here */
-	setenv("QUERY_STRING", cgiargs, 1); //line:netp:servedynamic:setenv
-	Dup2(fd, STDOUT_FILENO);         /* Redirect stdout to client */ //line:netp:servedynamic:dup2
-	Execve(filename, emptylist, environ); /* Run CGI program */ //line:netp:servedynamic:execve
+	setenv("QUERY_STRING", cgiargs, 1); 
+	Dup2(fd, STDOUT_FILENO);         /* Redirect stdout to client */
+	Execve(filename, emptylist, environ); /* Run CGI program */ 
     }
     Wait(NULL); /* Parent waits for and reaps child */ //line:netp:servedynamic:wait
 }
