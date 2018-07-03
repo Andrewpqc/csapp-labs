@@ -194,3 +194,16 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
     //now subprocess was reaped by SIGCHLD handler
     // Wait(NULL); /* Parent waits for and reaps child */ //line:netp:servedynamic:wait
 }
+
+
+//SIGCHLD signal handler
+void sigchld_handler(int sig){
+    int olderrno=errno;
+    pid_t pid;
+    while((pid=waitpid(-1,NULL,0))>0){
+        printf("subprocess [%d] was reaped!\n",pid);
+    }
+    if (errno!=ECHILD)
+        Sio_error("waitpid error");
+    errno=olderrno;
+}
