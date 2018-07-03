@@ -21,7 +21,6 @@ void doit(int fd){
     sscanf(buf,"%s %s %s",method,uri,version);//类比sprintf
     if (!strcasecmp(method,"GET")){
         read_requestheaders(&rio);
-
         /*Parse URI from GET request*/
         is_static = parse_uri(uri,filename,cgiargs);
         if (stat(filename,&sbuf)<0){
@@ -207,3 +206,5 @@ void sigchld_handler(int sig){
         Sio_error("waitpid error");
     errno=olderrno;
 }
+
+

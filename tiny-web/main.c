@@ -22,10 +22,13 @@ int main(int argc, char **argv){
     while(1){
         clientlen=sizeof(struct sockaddr_storage);
         connfd=Accept(listenfd,(SA*)&clientaddr,&clientlen);
-        Getnameinfo((SA*)&clientaddr,clientlen,hostname,MAXLINE,port,MAXLINE,0);
-        printf("Accept connection from (%s:%s)\n",hostname,port);
-        doit(connfd);
-        Close(connfd);
+        if(Fork()==0){
+            Signal(SIGCHLD,sigchld_handler);
+            Getnameinfo((SA*)&clientaddr,clientlen,hostname,MAXLINE,port,MAXLINE,0);
+            printf("Accept connection from (%s:%s)\n",hostname,port);
+            doit(connfd);
+            Close(connfd);
+            exit(1);
+        }
     }
-
 }
