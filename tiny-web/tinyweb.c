@@ -19,36 +19,42 @@ void doit(int fd){
     printf("Request Headers:\n");
     printf("%s",buf);
     sscanf(buf,"%s %s %s",method,uri,version);//类比sprintf
-    if (strcasecmp(method,"GET")){
-        clienterror(fd,method,"501",
-        "Not implemented","TinyWeb does not support this method");
-        return;
-    }
+    if (!strcasecmp(method,"GET")){
+        read_requestheaders(&rio);
 
-    read_requestheaders(&rio);
-    /*Parse URI from GET request*/
-
-    is_static = parse_uri(uri,filename,cgiargs);
-    if (stat(filename,&sbuf)<0){
-        clienterror(fd,filename,"404","Not Found","TinyWeb couldn't find this file");
-        return;
-    }
-
-    if(is_static){
-        if(!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)){
-            clienterror(fd,filename,"403","Forbidden","TinyWeb couldn't read this file");
+        /*Parse URI from GET request*/
+        is_static = parse_uri(uri,filename,cgiargs);
+        if (stat(filename,&sbuf)<0){
+            clienterror(fd,filename,"404","Not Found","TinyWeb couldn't find this file");
             return;
         }
 
-        serve_static(fd,filename,sbuf.st_size);
-    }
-    else{
-        if(!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)){
-            clienterror(fd,filename,"403","Forbidden","TinyWeb could't run this file");
-            return;        
+        if(is_static){
+            if(!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)){
+                clienterror(fd,filename,"403","Forbidden","TinyWeb couldn't read this file");
+                return;
+            }
+
+            serve_static(fd,filename,sbuf.st_size);
         }
-        serve_dynamic(fd,filename,cgiargs);
-    }
+        else{
+            if(!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)){
+                clienterror(fd,filename,"403","Forbidden","TinyWeb could't run this file");
+                return;        
+            }
+            serve_dynamic(fd,filename,cgiargs);
+        }
+    }else if(!strcasecmp(method,"POST")){
+        //post method implemented here
+    }else if(!strcasecmp(method,"PUT")){
+        //put method implemented here
+    }else if(!strcasecmp(method,"DELETE")){
+        //delete method implemented here
+    }else{
+        clienterror(fd,method,"501",
+        "Not implemented","TinyWeb does not support this method");
+        return;
+    }   
 }
 
 
@@ -184,6 +190,20 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
 	Dup2(fd, STDOUT_FILENO);         /* Redirect stdout to client */
 	Execve(filename, emptylist, environ); /* Run CGI program */ 
     }
-    Wait(NULL); /* Parent waits for and reaps child */ //line:netp:servedynamic:wait
+
+    //now subprocess was reaped by SIGCHLD handler
+    // Wait(NULL); /* Parent waits for and reaps child */ //line:netp:servedynamic:wait
 }
-/* $end serve_dynamic */
+
+
+//SIGCHLD signal handler
+void sigchld_handler(int sig){
+    int olderrno=errno;
+    pid_t pid;
+    while((pid=waitpid(-1,NULL,0))>0){
+        printf("subprocess [%d] was reaped!\n",pid);
+    }
+    if (errno!=ECHILD)
+        Sio_error("waitpid error");
+    errno=olderrno;
+}
