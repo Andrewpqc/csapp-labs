@@ -184,6 +184,7 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
 	Dup2(fd, STDOUT_FILENO);         /* Redirect stdout to client */
 	Execve(filename, emptylist, environ); /* Run CGI program */ 
     }
-    Wait(NULL); /* Parent waits for and reaps child */ //line:netp:servedynamic:wait
+
+    //now subprocess was reaped by SIGCHLD handler
+    // Wait(NULL); /* Parent waits for and reaps child */ //line:netp:servedynamic:wait
 }
-/* $end serve_dynamic */
