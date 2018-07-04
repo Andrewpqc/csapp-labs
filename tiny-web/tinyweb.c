@@ -199,7 +199,7 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
 void sigchld_handler(int sig){
     int olderrno=errno;
     pid_t pid;
-    while((pid=waitpid(-1,NULL,0))>0){
+    while((pid=waitpid(-1,NULL,WNOHANG))>0){
         printf("subprocess [%d] was reaped!\n",pid);
     }
     if (errno!=ECHILD)
