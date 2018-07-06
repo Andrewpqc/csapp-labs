@@ -1,18 +1,29 @@
 #include <stdio.h>
-#include "csapp.h"
-#include "proxy.h"
 #include <stdlib.h>
 #include <string.h>
+#include "csapp.h"
+#include "sbuf.h"
+
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
 
 /* You won't lose style points for including this long line in your code */
-static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
+static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) \
+                                        Gecko/20120305 Firefox/10.0.3\r\n";
 
 
 
+
+void doit(int fd);
+void read_requestheaders(rio_t *rp);
+int parse_uri(char* uri,char*filename,char* cgiargs);
+void serve_static(int fd,char* filename,int filesize);
+void get_filetype(char* filename,char* filetype);
+void serve_dynamic(int fd, char*filename,char* cgiargs);
+void clienterror(int fd, char* cause,char*errnum,char*shortmsg,char*longmeg);
+void forward_to_upstream(int  );
 
 //处理http事务，fd为连接描述符
 void doit(int fd){
@@ -38,35 +49,32 @@ void doit(int fd){
 
 
     if (!strcasecmp(method,"GET")){
-        /*Parse URI from GET request*/
-        is_static = parse_uri(uri,filename,cgiargs);
-        if (stat(filename,&sbuf)<0){
-            clienterror(fd,filename,"404","Not Found","TinyWeb couldn't find this file");
-            return;
-        }
 
-        if(is_static){
-            if(!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)){
-                clienterror(fd,filename,"403","Forbidden","TinyWeb couldn't read this file");
-                return;
-            }
 
-            serve_static(fd,filename,sbuf.st_size);
-        }
-        else{
-            if(!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)){
-                clienterror(fd,filename,"403","Forbidden","TinyWeb could't run this file");
-                return;        
-            }
-            serve_dynamic(fd,filename,cgiargs);
-        }
-    }else if(!strcasecmp(method,"POST")){
-        //post method implemented here
-    }else if(!strcasecmp(method,"PUT")){
-        //put method implemented here
-    }else if(!strcasecmp(method,"DELETE")){
-        //delete method implemented here
-    }else{
+        // /*Parse URI from GET request*/
+        // is_static = parse_uri(uri,filename,cgiargs);
+        // if (stat(filename,&sbuf)<0){
+        //     clienterror(fd,filename,"404","Not Found","TinyWeb couldn't find this file");
+        //     return;
+        // }
+
+        // if(is_static){
+        //     if(!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)){
+        //         clienterror(fd,filename,"403","Forbidden","TinyWeb couldn't read this file");
+        //         return;
+        //     }
+
+        //     serve_static(fd,filename,sbuf.st_size);
+        // }
+        // else{
+        //     if(!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)){
+        //         clienterror(fd,filename,"403","Forbidden","TinyWeb could't run this file");
+        //         return;        
+        //     }
+        //     serve_dynamic(fd,filename,cgiargs);
+        // }
+    }
+    else{
         clienterror(fd,method,"501",
         "Not implemented","TinyWeb does not support this method");
         return;
@@ -213,20 +221,9 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
 }
 
 
-//SIGCHLD signal handler
-void sigchld_handler(int sig){
-    int olderrno=errno;
-    pid_t pid;
-    while((pid=waitpid(-1,NULL,0))>0){
-        printf("subprocess [%d] was reaped!\n",pid);
-    }
-    if (errno!=ECHILD)
-        Sio_error("waitpid error");
-    errno=olderrno;
-}
 
 
-
+//the main code
 int main(int argc,char** argv)
 {
     // printf("%s", user_agent_hdr);
@@ -245,8 +242,7 @@ int main(int argc,char** argv)
     printf("Server listening on :%s\n",argv[1]);
     fflush(stdout);
 
-    //regist signal handler here.
-    Signal(SIGCHLD,sigchld_handler);
+   
 
     listenfd=Open_listenfd(argv[1]);
     while(1){
