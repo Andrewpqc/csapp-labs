@@ -1,13 +1,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "csapp.h"
-#include "sbuf.h"
 
+#include "csapp.h"
+
+#include "./sbuf/sbuf.h"
+#include "./lrucache/lru_cache.h"
+#include "./lrucache/lru_cache_impl.h"
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
+
+void *LruCache; //全局的缓存器变量
+
 
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) \
@@ -16,7 +22,7 @@ static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64;
 
 
 
-void doit(int fd);
+void doit(int fd,char *request_host, char *request_port);
 void read_requestheaders(rio_t *rp);
 int parse_uri(char* uri,char*filename,char* cgiargs);
 void serve_static(int fd,char* filename,int filesize);
@@ -26,11 +32,12 @@ void clienterror(int fd, char* cause,char*errnum,char*shortmsg,char*longmeg);
 void forward_to_upstream(int  );
 
 //处理http事务，fd为连接描述符
-void doit(int fd){
+void doit(int fd,char *hostname, char *port){
     int is_static;
     struct stat sbuf;
     char buf[MAXLINE],method[MAXLINE],uri[MAXLINE],version[MAXLINE];
     char filename[MAXLINE],cgiargs[MAXLINE];
+    char cache_key[KEY_SIZE],cache_value[VALUE_SIZE];
     rio_t rio;
     
     Rio_readinitb(&rio,fd);
@@ -47,38 +54,19 @@ void doit(int fd){
      * 直接在本地缓存中取出缓存内容
      **/ 
 
-
-    if (!strcasecmp(method,"GET")){
-
-
-        // /*Parse URI from GET request*/
-        // is_static = parse_uri(uri,filename,cgiargs);
-        // if (stat(filename,&sbuf)<0){
-        //     clienterror(fd,filename,"404","Not Found","TinyWeb couldn't find this file");
-        //     return;
-        // }
-
-        // if(is_static){
-        //     if(!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)){
-        //         clienterror(fd,filename,"403","Forbidden","TinyWeb couldn't read this file");
-        //         return;
-        //     }
-
-        //     serve_static(fd,filename,sbuf.st_size);
-        // }
-        // else{
-        //     if(!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)){
-        //         clienterror(fd,filename,"403","Forbidden","TinyWeb could't run this file");
-        //         return;        
-        //     }
-        //     serve_dynamic(fd,filename,cgiargs);
-        // }
-    }
-    else{
+    //非GET请求被拦截
+    if (strcasecmp(method,"GET")){
         clienterror(fd,method,"501",
         "Not implemented","TinyWeb does not support this method");
         return;
-    }   
+    }
+    
+    //根据请求生成标识该请求的key
+    sprintf(cache_key,"%s.%s.%s.%s.%s",method,uri,version,hostname,port);
+    
+    
+        
+      
 }
 
 
@@ -226,19 +214,24 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
 //the main code
 int main(int argc,char** argv)
 {
-    // printf("%s", user_agent_hdr);
-    // return 0;
 
     int listenfd, connfd;
     char hostname[MAXLINE], port[MAXLINE];
     socklen_t clientlen;
     struct sockaddr_storage clientaddr;
 
-    if (argc!=2){
-        fprintf(stderr,"Usage: %s <port>\n",argv[0]);
+    if (argc!=3){
+        fprintf(stderr,"Usage: %s <port> <cache capacity >\n",argv[0]);
         exit(1);
     }
     
+    
+    //创建缓存器
+    if (0 != LRUCacheCreate(atoi(argv[2]), &LruCache)){
+        printf("Cache create failed!");
+        exit(1);
+    }
+
     printf("Server listening on :%s\n",argv[1]);
     fflush(stdout);
 
@@ -250,7 +243,7 @@ int main(int argc,char** argv)
         connfd=Accept(listenfd,(SA*)&clientaddr,&clientlen);
         Getnameinfo((SA*)&clientaddr,clientlen,hostname,MAXLINE,port,MAXLINE,0);
         printf("Accept connection from (%s:%s)\n",hostname,port);
-        doit(connfd);
+        doit(connfd,hostname,port);
         Close(connfd);
     }
 }

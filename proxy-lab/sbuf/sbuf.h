@@ -1,12 +1,10 @@
 //线程安全的缓存对列包
-
-
-
-#include "csapp.h"
-#include <stdbool.h>
-
 #ifndef SBUF_H
 #define SBUF_H
+
+
+#include "../csapp.h"
+#include <stdbool.h>
 
 typedef struct{
     int *buf;
