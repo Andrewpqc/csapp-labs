@@ -29,15 +29,15 @@ void serve_static(int fd,char* filename,int filesize);
 void get_filetype(char* filename,char* filetype);
 void serve_dynamic(int fd, char*filename,char* cgiargs);
 void clienterror(int fd, char* cause,char*errnum,char*shortmsg,char*longmeg);
-void forward_to_upstream(int  );
 
+char *forward_to_upstream(rio_t *rio,char *upstream_host,char * upstream_port, char *request_line);
 //处理http事务，fd为连接描述符
-void doit(int fd,char *hostname, char *port){
+void doit(int fd,char *request_host, char *request_port){
     int is_static;
     struct stat sbuf;
     char buf[MAXLINE],method[MAXLINE],uri[MAXLINE],version[MAXLINE];
-    char filename[MAXLINE],cgiargs[MAXLINE];
-    char cache_key[KEY_SIZE],cache_value[VALUE_SIZE];
+    char filename[MAXLINE],cgiargs[MAXLINE],resp_content[MAXLINE];
+    char cache_key[KEY_SIZE],cache_value[VALUE_SIZE],request_line[MAXLINE];
     rio_t rio;
     
     Rio_readinitb(&rio,fd);
@@ -45,14 +45,7 @@ void doit(int fd,char *hostname, char *port){
     printf("Request Headers:\n");
     printf("%s",buf);
     sscanf(buf,"%s %s %s",method,uri,version);//类比sprintf
-    read_requestheaders(&rio);
-
-    /**
-     * 此处的逻辑是先检查本地缓存中是否存在所需的请求内容
-     * 若不存在请求的内容，则向上游服务器转发请求并获取上游服务器
-     * 的响应内容，然后转发至客户端，如果本地缓存中存在请求内容则
-     * 直接在本地缓存中取出缓存内容
-     **/ 
+    // read_requestheaders(&rio);
 
     //非GET请求被拦截
     if (strcasecmp(method,"GET")){
@@ -62,13 +55,76 @@ void doit(int fd,char *hostname, char *port){
     }
     
     //根据请求生成标识该请求的key
-    sprintf(cache_key,"%s.%s.%s.%s.%s",method,uri,version,hostname,port);
-    
-    
+    sprintf(cache_key,"%s.%s.%s.%s.%s",method,uri,version,request_host,request_port);
+    if (NULL == LRUCacheGet(LruCache, cache_key)){
+        //未缓存，此时，应该向上游服务器取数据，
+        //并且将数据缓存在缓存器中，同时发一份到客户端
+        sprintf(request_line,"%s %s %s\r\n",method,uri,version);
+        strncmp(resp_content,forward_to_upstream(&rio,"127.0.0.1","8000",request_line),MAXLINE);
         
-      
+        // //设置缓存
+        // LRUCacheSet(LruCache,cache_key,resp_content);
+        
+        // //返回响应给客户端
+        // Rio_writen(fd, resp_content, strlen(resp_content));
+
+
+        ///////////////////////////////////////////////////////
+        printf("未缓存");
+    }
+    else{
+        char data[VALUE_SIZE];
+        strncpy(data, LRUCacheGet(LruCache, cache_key), VALUE_SIZE);
+        Rio_writen(fd, data, strlen(data));
+        //直接将缓存的数据发到客户端
+    }
 }
 
+
+char *forward_to_upstream(rio_t *rio,char *upstream_host,char * upstream_port,char *request_line){
+    int upstreamfd;
+    char userbuf[MAXLINE];
+    char resp_content[MAXLINE];
+    rio_t upstream_rio;
+     
+    upstreamfd = open_clientfd(upstream_host,upstream_port);
+   
+   
+    //将upstream_rio与upstreamfd绑定在一起,
+    //上游服务器的响应内容从upstream_rio中读取
+    Rio_readinitb(&upstream_rio,upstreamfd);
+
+    //首先发送请求行
+    Rio_writen(upstreamfd,request_line,strlen(request_line));
+   
+    //接下来从客户端边读变送往服务器
+
+
+    //这里发生了段错误
+    Rio_readlineb(rio,userbuf,MAXLINE);
+    printf("userbuf:%s",userbuf);
+    fflush(stdout);
+    Rio_writen(upstreamfd,userbuf,MAXLINE);
+    while(strncmp(userbuf,"\r\n",MAXLINE)){
+        Rio_readlineb(rio,userbuf,MAXLINE);
+        Rio_writen(upstreamfd,userbuf,MAXLINE);
+    }
+    Rio_writen(upstreamfd,"\r\n",MAXLINE); //发送空行表示请求结束
+    
+    //发送完毕就需要接收服务器的返回内容了    
+    if(!Rio_readlineb(&upstream_rio,userbuf,MAXLINE)){
+    //     //上游服务器没有响应任何内容
+    }
+    sprintf(resp_content,"%s",userbuf);
+    printf(">>>>>>>>>>>>>>>>");
+    while(Rio_readlineb(&upstream_rio,userbuf,MAXLINE)){//EOF时为0
+        printf("mmmmm:%s",userbuf);
+        fflush(stdout);
+        sprintf(resp_content,"%s%s",resp_content,userbuf);
+    }
+    
+    return resp_content;
+}
 
 void clienterror(int fd,char* cause,char* errnum,char* shortmsg, char* longmsg){
     char buf[MAXLINE],body[MAXLINE];
@@ -95,8 +151,8 @@ void read_requestheaders(rio_t *rp){
     Rio_readlineb(rp, buf, MAXLINE);
     printf("%s", buf);
     while(strcmp(buf, "\r\n")) {          
-	Rio_readlineb(rp, buf, MAXLINE);
-	printf("%s", buf);
+	    Rio_readlineb(rp, buf, MAXLINE);
+	    printf("%s", buf);
     }
     fflush(stdout);
     return;
@@ -214,18 +270,17 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
 //the main code
 int main(int argc,char** argv)
 {
-
     int listenfd, connfd;
     char hostname[MAXLINE], port[MAXLINE];
     socklen_t clientlen;
     struct sockaddr_storage clientaddr;
 
+    //检查启动参数
     if (argc!=3){
-        fprintf(stderr,"Usage: %s <port> <cache capacity >\n",argv[0]);
+        fprintf(stderr,"Usage: %s <port> <cache capacity>\n",argv[0]);
         exit(1);
     }
-    
-    
+
     //创建缓存器
     if (0 != LRUCacheCreate(atoi(argv[2]), &LruCache)){
         printf("Cache create failed!");
