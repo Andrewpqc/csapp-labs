@@ -21,7 +21,6 @@ void doit(int fd){
     sscanf(buf,"%s %s %s",method,uri,version);//类比sprintf
     if (!strcasecmp(method,"GET")){
         read_requestheaders(&rio);
-
         /*Parse URI from GET request*/
         is_static = parse_uri(uri,filename,cgiargs);
         if (stat(filename,&sbuf)<0){
@@ -200,10 +199,12 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
 void sigchld_handler(int sig){
     int olderrno=errno;
     pid_t pid;
-    while((pid=waitpid(-1,NULL,0))>0){
+    while((pid=waitpid(-1,NULL,WNOHANG))>0){
         printf("subprocess [%d] was reaped!\n",pid);
     }
     if (errno!=ECHILD)
         Sio_error("waitpid error");
     errno=olderrno;
 }
+
+
