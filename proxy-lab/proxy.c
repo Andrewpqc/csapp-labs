@@ -22,21 +22,15 @@ static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64;
 
 
 
-void doit(int fd,char *request_host, char *request_port);
-void read_requestheaders(rio_t *rp);
-int parse_uri(char* uri,char*filename,char* cgiargs);
-void serve_static(int fd,char* filename,int filesize);
-void get_filetype(char* filename,char* filetype);
-void serve_dynamic(int fd, char*filename,char* cgiargs);
+void doit(int fd,char *request_host);
 void clienterror(int fd, char* cause,char*errnum,char*shortmsg,char*longmeg);
+void forward_to_upstream(rio_t *rio,char *upstream_host,char * upstream_port, char *request_line,char *response_content);
 
-char *forward_to_upstream(rio_t *rio,char *upstream_host,char * upstream_port, char *request_line);
-//处理http事务，fd为连接描述符
-void doit(int fd,char *request_host, char *request_port){
+void doit(int fd,char *request_host){
     int is_static;
     struct stat sbuf;
     char buf[MAXLINE],method[MAXLINE],uri[MAXLINE],version[MAXLINE];
-    char filename[MAXLINE],cgiargs[MAXLINE],resp_content[MAXLINE];
+    char filename[MAXLINE],cgiargs[MAXLINE],response_content[MAXLINE]="";
     char cache_key[KEY_SIZE],cache_value[VALUE_SIZE],request_line[MAXLINE];
     rio_t rio;
     
@@ -53,27 +47,24 @@ void doit(int fd,char *request_host, char *request_port){
         "Not implemented","TinyWeb does not support this method");
         return;
     }
-    
+   
     //根据请求生成标识该请求的key
-    sprintf(cache_key,"%s.%s.%s.%s.%s",method,uri,version,request_host,request_port);
+    sprintf(cache_key,"%s.%s.%s.%s",method,uri,version,request_host);
     if (NULL == LRUCacheGet(LruCache, cache_key)){
-        //未缓存，此时，应该向上游服务器取数据，
-        //并且将数据缓存在缓存器中，同时发一份到客户端
+         printf("未缓存");
+         fflush(stdout);
         sprintf(request_line,"%s %s %s\r\n",method,uri,version);
-        strncmp(resp_content,forward_to_upstream(&rio,"127.0.0.1","8000",request_line),MAXLINE);
-        
-        // //设置缓存
-        // LRUCacheSet(LruCache,cache_key,resp_content);
-        
-        // //返回响应给客户端
-        // Rio_writen(fd, resp_content, strlen(resp_content));
-
-
-        ///////////////////////////////////////////////////////
-        printf("未缓存");
+        forward_to_upstream(&rio,"127.0.0.1","8000",request_line,response_content);
+        //设置缓存
+        LRUCacheSet(LruCache,cache_key,response_content); 
+        strncpy(response_content,"",MAXLINE);
+        //返回响应给客户端
+        Rio_writen(fd, response_content, strlen(response_content));
     }
     else{
-        char data[VALUE_SIZE];
+        printf("已缓存");
+        fflush(stdout);
+        char data[VALUE_SIZE]="";
         strncpy(data, LRUCacheGet(LruCache, cache_key), VALUE_SIZE);
         Rio_writen(fd, data, strlen(data));
         //直接将缓存的数据发到客户端
@@ -81,29 +72,24 @@ void doit(int fd,char *request_host, char *request_port){
 }
 
 
-char *forward_to_upstream(rio_t *rio,char *upstream_host,char * upstream_port,char *request_line){
+void forward_to_upstream(rio_t *rio,char *upstream_host,char * upstream_port,char *request_line,char * response_content){
     int upstreamfd;
     char userbuf[MAXLINE];
     char resp_content[MAXLINE];
     rio_t upstream_rio;
-     
+    char content_length[50];
+    size_t size=0,content_length_int;
     upstreamfd = open_clientfd(upstream_host,upstream_port);
    
    
-    //将upstream_rio与upstreamfd绑定在一起,
-    //上游服务器的响应内容从upstream_rio中读取
-    Rio_readinitb(&upstream_rio,upstreamfd);
-
     //首先发送请求行
     Rio_writen(upstreamfd,request_line,strlen(request_line));
    
-    //接下来从客户端边读变送往服务器
-
-
-    //这里发生了段错误
-    Rio_readlineb(rio,userbuf,MAXLINE);
-    printf("userbuf:%s",userbuf);
+    printf("hhhhhhhhhhhhhh");
     fflush(stdout);
+
+    //接下来从客户端边读变送往服务器
+    Rio_readlineb(rio,userbuf,MAXLINE);
     Rio_writen(upstreamfd,userbuf,MAXLINE);
     while(strncmp(userbuf,"\r\n",MAXLINE)){
         Rio_readlineb(rio,userbuf,MAXLINE);
@@ -111,19 +97,35 @@ char *forward_to_upstream(rio_t *rio,char *upstream_host,char * upstream_port,ch
     }
     Rio_writen(upstreamfd,"\r\n",MAXLINE); //发送空行表示请求结束
     
-    //发送完毕就需要接收服务器的返回内容了    
-    if(!Rio_readlineb(&upstream_rio,userbuf,MAXLINE)){
-    //     //上游服务器没有响应任何内容
-    }
-    sprintf(resp_content,"%s",userbuf);
-    printf(">>>>>>>>>>>>>>>>");
-    while(Rio_readlineb(&upstream_rio,userbuf,MAXLINE)){//EOF时为0
-        printf("mmmmm:%s",userbuf);
-        fflush(stdout);
+
+    //将upstream_rio与upstreamfd绑定在一起,
+    //上游服务器的响应内容从upstream_rio中读取
+    Rio_readinitb(&upstream_rio,upstreamfd);
+
+    //读取响应头
+    Rio_readlineb(&upstream_rio,userbuf,MAXLINE);
+    sprintf(resp_content,"%s%s",resp_content,userbuf);
+    while(strncmp(userbuf,"\r\n",MAXLINE)){
+        Rio_readlineb(&upstream_rio,userbuf,MAXLINE);
+        if(strstr(userbuf,"length") != NULL){
+            strncpy(content_length,userbuf+16,MAXLINE);
+        }
         sprintf(resp_content,"%s%s",resp_content,userbuf);
     }
     
-    return resp_content;
+    //如果content_lenght不为0,则继续读取响应体
+    content_length_int=atoi(content_length);
+    if(content_length_int!=0){
+        //读取响应体
+        size+=Rio_readlineb(&upstream_rio,userbuf,MAXLINE);
+        sprintf(resp_content,"%s%s",resp_content,userbuf);
+        while(size<content_length_int){
+            size+=Rio_readlineb(&upstream_rio,userbuf,MAXLINE);
+            sprintf(resp_content,"%s%s",resp_content,userbuf);
+        }
+    }
+    strncpy(response_content,resp_content,MAXLINE);
+    return; 
 }
 
 void clienterror(int fd,char* cause,char* errnum,char* shortmsg, char* longmsg){
@@ -145,125 +147,6 @@ void clienterror(int fd,char* cause,char* errnum,char* shortmsg, char* longmsg){
     Rio_writen(fd, buf, strlen(buf));
     Rio_writen(fd, body, strlen(body));
 }
-
-void read_requestheaders(rio_t *rp){
-    char buf[MAXLINE];
-    Rio_readlineb(rp, buf, MAXLINE);
-    printf("%s", buf);
-    while(strcmp(buf, "\r\n")) {          
-	    Rio_readlineb(rp, buf, MAXLINE);
-	    printf("%s", buf);
-    }
-    fflush(stdout);
-    return;
-}
-
-
-int parse_uri(char *uri, char *filename, char *cgiargs) 
-{
-    char *ptr;
-
-    if (!strstr(uri, "cgi-bin")) {  /* Static content */
-	strcpy(cgiargs, "");                            
-	strcpy(filename, ".");                           
-	strcat(filename, uri);                           
-	if (uri[strlen(uri)-1] == '/')                   
-	    strcat(filename, "home.html");              
-	return 1;
-    }
-    else {  /* Dynamic content */                        
-	ptr = index(uri, '?');                           
-	if (ptr) {
-	    strcpy(cgiargs, ptr+1);
-	    *ptr = '\0';
-	}
-	else 
-	    strcpy(cgiargs, "");                         
-	strcpy(filename, ".");                           
-	strcat(filename, uri);                           
-	return 0;
-    }
-}
-
-void serve_static(int fd, char *filename, int filesize) 
-{
-    int srcfd;
-    char *srcp, filetype[MAXLINE], buf[MAXBUF];
- 
-    /* Send response headers to client */
-    get_filetype(filename, filetype);       
-    sprintf(buf, "HTTP/1.0 200 OK\r\n");    
-    sprintf(buf, "%sServer: Tiny Web Server\r\n", buf);
-    sprintf(buf, "%sConnection: close\r\n", buf);
-    sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
-    sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, filetype);
-    Rio_writen(fd, buf, strlen(buf));      
-    printf("Response headers:\n");
-    printf("%s", buf);
-
-    /* Send response body to client */
-    srcfd = Open(filename, O_RDONLY, 0);    
-    
-    //将被请求文件内容映射到一个虚拟地址空间
-    //调用mmap将文件srcfd的前filesize个字节
-    //映射到一个从地址srcp开始的私有只读虚拟内存区域
-    srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
-    Close(srcfd);//因为已经将文件映射到了内存，所以不在需要文件描述符了                           
-    Rio_writen(fd, srcp, filesize);        
-    Munmap(srcp, filesize);
-
-    //上面使用的是Mmap,Munmap,也可以使用下面的方式
-    // char *data = (char*)malloc(filesize * sizeof(char));
-    // while(rio_readn(srcfd, data, filesize) > 0) {
-    //     rio_writen(fd, data, filesize);
-    // }
-    // Close(srcfd);
-   
-}
-
-
-void get_filetype(char *filename, char *filetype) 
-{
-    if (strstr(filename, ".html"))
-	    strcpy(filetype, "text/html");
-    else if (strstr(filename, ".gif"))
-	    strcpy(filetype, "image/gif");
-    else if (strstr(filename, ".png"))
-	    strcpy(filetype, "image/png");
-    else if (strstr(filename, ".jpg"))
-	    strcpy(filetype, "image/jpeg");
-    else if (strstr(filename, ".mpg"))
-        strcpy(filetype, "video/mpeg");
-    else
-	    strcpy(filetype, "text/plain");
-}  
-
-
-/*
- * serve_dynamic - run a CGI program on behalf of the client
- */
-/* $begin serve_dynamic */
-void serve_dynamic(int fd, char *filename, char *cgiargs) 
-{
-    char buf[MAXLINE], *emptylist[] = { NULL };
-
-    /* Return first part of HTTP response */
-    sprintf(buf, "HTTP/1.0 200 OK\r\n"); 
-    Rio_writen(fd, buf, strlen(buf));
-    sprintf(buf, "Server: Tiny Web Server\r\n");
-    Rio_writen(fd, buf, strlen(buf));
-  
-    if (Fork() == 0) { /* Child */ 
-	/* Real server would set all CGI vars here */
-	setenv("QUERY_STRING", cgiargs, 1); 
-	Dup2(fd, STDOUT_FILENO);         /* Redirect stdout to client */
-	Execve(filename, emptylist, environ); /* Run CGI program */ 
-    }
-
-    //now subprocess was reaped by SIGCHLD handler
-    // Wait(NULL); /* Parent waits for and reaps child */ //line:netp:servedynamic:wait
-}
-
 
 
 
@@ -298,7 +181,10 @@ int main(int argc,char** argv)
         connfd=Accept(listenfd,(SA*)&clientaddr,&clientlen);
         Getnameinfo((SA*)&clientaddr,clientlen,hostname,MAXLINE,port,MAXLINE,0);
         printf("Accept connection from (%s:%s)\n",hostname,port);
-        doit(connfd,hostname,port);
+        doit(connfd,hostname);
         Close(connfd);
     }
+
+    // Close(listenfd);
+    // LRUCacheDestory(LruCache);
 }
